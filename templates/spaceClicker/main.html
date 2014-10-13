@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+<meta content="utf-8" http-equiv="encoding">
+{% load staticfiles %}
+<script src='{% static "spaceClicker/staticDefs.js" %}'></script>
+<script src='{% static "spaceClicker/other.js" %}'></script>
+<script src='{% static "spaceClicker/resources.js" %}'></script>
+<script src='{% static "spaceClicker/workers.js" %}'></script>
+<script src='{% static "spaceClicker/upgrade.js" %}'></script>
+<script src='{% static "spaceClicker/events.js" %}'></script>
+<script src='{% static "spaceClicker/game.js" %}'></script>
+<script src='{% static "spaceClicker/display.js" %}'></script>
+<script src='{% static "spaceClicker/jquery-1.11.1.min.js" %}'></script>
+<style>
+div.workerSpace {
+  width: 300px;
+  height: 35px;
+  padding: 0px;
+  border: 5px solid black;
+  margin: 0;
+}
+div.workerSpaceUnassigned {
+  width: 400px;
+  height: 65px;
+  padding: 0px;
+  border: 5px solid black;
+  margin: 0;
+}
+
+img.cannotAfford {
+  background: #BFBFBF;
+  opacity: .4;
+}
+img.canAfford {
+  cursor: pointer;
+  background: #BFBFBF;
+  opacity: 1;
+}
+
+div.tooltip {
+	width: 400px;
+	height: 70px;
+	border: 5px solid black;
+	background-color: #cccccc;
+	position: fixed;
+	z-index: 100000;
+  pointer-events: none;
+  display: none;
+}
+
+#leftSection
+{
+	position:absolute;
+	left:0px;
+	top:0px;
+	width:50%;
+	min-width:200px;
+	overflow-x:hidden;
+	overflow-y:scroll;
+}
+#rightSection
+{
+	position:absolute;
+	left:50%;
+	top:0px;
+	min-width:200px;
+	overflow-x:hidden;
+	overflow-y:scroll;
+}
+</style>
+<title>Space Clicker</title>
+</head>
+
+
+
+<body>
+  <div id="tt" class="tooltip"></div>
+
+  <div id="leftSection">
+    <div id="clickSection">
+      <div id="resourceSection">
+      </div>
+      <br>
+      <div id="unassignedworkerpool" class="workerSpaceUnassigned" ondrop="workerDrop(event)" ondragover="allowWorkerDrop(event)">
+      </div>
+    </div>
+
+    <div id="countSection">
+    </div>
+  </div>
+
+  
+  <div id= "rightSection">
+    <div id="workerStore">
+    </div>
+    
+    <br>
+    <div id="upgradeSection">
+      <div id="purchasedUpgrades">
+      </div>
+      <br><br>
+      <div id="upgradeStore">
+      </div>
+    </div>
+    
+    <div id="menuSection">
+      <button id="save" type="button" onclick="saveGame()">Save</button><br>
+      <button id="reset" type="button" onclick="resetGame()">Reset</button>
+
+      <p>You are using {{ browser }}</p>
+      <p>{{ userState }}</p>
+      <p id="status"></p>
+    </div>
+  </div>
+  
+  
+</body>
+
+
+<script>
+var game = new gameStuff();
+var draggedWorkerId = null;
+
+//define the resource list and set initial counts from the database
+game.setResourceCount("credits", {{ resCount.credits }});
+game.setResourceCount("food", {{ resCount.food }});
+game.setResourceCount("metal", {{ resCount.metal }});
+game.setResourceCount("energy", {{ resCount.energy }});
+game.setResourceCount("artifacts", {{ resCount.artifacts }});
+game.setResourceCount("weapons", {{ resCount.weapons }});
+game.setResourceCount("biocomponents", {{ resCount.biocomponents }});
+game.setResourceCount("rareElements", {{ resCount.rareElements }});
+
+// set all upgrades from previous play
+{% for upgradeId in upgrades %}
+  game.setUpgrade({{ upgradeId }});
+{% endfor %}
+
+// set all workers
+{% for worker in workers %}
+  game.setWorker({{ worker.id }},{{ worker.status }});
+{% endfor %}
+
+// initialize resource button and count display names
+game.updateResourceVariables();
+game.updateResourceDisplay();
+
+// initialize upgrade and worker displays
+game.updateUpgradeDisplay();
+game.updateWorkerDisplay();
+
+// check for availability of upgrades and workers every 3 seconds
+setInterval(function() {
+  game.testForAvailability();
+}, 3000);
+
+
+// price check and worker click check every 500 ms
+setInterval(function() {
+  game.workerClick();
+  game.priceCheck();
+}, 500);
+
+
+// see if event occurs every 10 seconds
+setInterval(function() {
+  game.eventCheck();
+}, 10000);
+
+
+//game clock every
+
+
+
+function showTooltip(obj) {
+  var TOOLTIP_OFFSET = 20;
+
+  if (obj.id.startsWith("upgrade")) {
+    var upgradeId = parseInt(obj.id.replace('upgrade', ''), 10);
+    var upgrade = game.upgradeHub.getUpgradeFromId(upgradeId);
+    var tooltipString = upgrade.createTooltip();
+  } else if (obj.id.startsWith("worker")) {
+    var workerId = parseInt(obj.id.replace('worker', ''), 10);
+    var worker = game.workerHub.getWorkerFromId(workerId);
+    var tooltipString = worker.createTooltip();
+  } else {
+    return "error";
+  }
+  
+  var position = obj.getBoundingClientRect();
+  
+  var tt = document.getElementById("tt");
+  tt.innerHTML = tooltipString.join("<br>");
+  tt.style.top = (position.top + TOOLTIP_OFFSET).toString() + "px";
+  tt.style.left = (position.left + TOOLTIP_OFFSET).toString() + "px";
+  tt.style.height = (20 * tooltipString.length).toString() + "px";
+  tt.style.display = 'block';
+}
+
+
+function hideTooltip() {
+  tt = document.getElementById("tt")
+  tt.style.display = 'none';
+}
+
+
+
+function workerDragStart(ev) {
+  hideTooltip();
+  // get worker id from the id of the dragged element
+  var workerId = parseInt(ev.target.id.replace('worker', ''), 10);
+  draggedWorkerId = workerId;
+  
+  // set border colors for where the worker can be dragged
+  for (resource of game.resourceHub.resourceList) {
+    if (resource.buttonVisible) {
+      var poolDiv = document.getElementById(resource.workerPoolId);
+      if (game.workerIdResourceMatch(workerId, resource)) {
+        poolDiv.style.border = WORKER_ALLOWED_BORDER;
+      } else {
+        poolDiv.style.border = WORKER_DISALLOWED_BORDER;
+      }
+    }
+  }
+
+  document.getElementById('unassignedworkerpool').style.border = WORKER_ALLOWED_BORDER;
+}
+
+
+function workerDragEnd(ev) {
+  // set border colors back to normal
+  for (resource of game.resourceHub.resourceList) {
+    if (resource.buttonVisible) {
+      var poolDiv = document.getElementById(resource.workerPoolId);
+      poolDiv.style.border = WORKER_NORMAL_BORDER;
+    }
+  }
+  
+  document.getElementById('unassignedworkerpool').style.border = WORKER_NORMAL_BORDER;
+}
+
+
+function allowWorkerDrop(ev) {
+  // only allow the drop if the worker goes with that resource and the drop is over a worker pool
+  for (resource of game.resourceHub.resourceList) {
+    if (game.workerIdResourceMatch(draggedWorkerId, resource)) {
+      if (ev.target.id == resource.workerPoolId || ev.target.id == "unassignedworkerpool") {
+        ev.preventDefault();
+      }
+    }
+  }
+}
+
+
+function workerDrop(ev) {
+  ev.preventDefault();
+
+  targetResName = ev.target.id.replace('workerpool', '');
+  
+  if (targetResName == 'unassigned') {
+    targetResName = null;
+  }
+  
+  game.reassignWorker(draggedWorkerId, targetResName)
+  game.updateResourceDisplay();
+  game.updateWorkerDisplay();
+}
+
+
+
+
+function getCookie(name) {
+  var cookieValue = null;
+  if (document.cookie && document.cookie != '') {
+    var cookies = document.cookie.split(';');
+    for (var i = 0; i < cookies.length; i++) {
+      var cookie = jQuery.trim(cookies[i]);
+      // Does this cookie string begin with the name we want?
+      if (cookie.substring(0, name.length + 1) == (name + '=')) {
+        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+        break;
+      }
+    }
+  }
+  return cookieValue;
+}
+var csrftoken = getCookie('csrftoken');
+
+
+// Autosave every 1 minute
+//setInterval(saveState(),1000*60);
+
+
+function saveGame() {
+  var http = new XMLHttpRequest();
+  
+  
+  var gameData = {
+    "resources":{},
+    "upgrades":{},
+    "events":{},
+    "workers":{},
+    "playerId":{{ userId }}
+  };
+  
+  for (var resType of game.resourceHub.resourceList) {
+    gameData["resources"][resType.name] = resType.count;
+  }
+  
+  for (var upgrade of game.upgradeHub.upgrades) {
+    gameData["upgrades"][upgrade.id.toString()] = upgrade.purchased;
+  }
+  
+  for (var worker of game.workerHub.workerList) {
+    gameData["workers"][worker.id.toString()] = worker.getDbNumber();
+  }
+  
+  gameData = JSON.stringify(gameData);
+
+  
+  http.open("POST", "/game/save/", true);
+  
+  http.setRequestHeader("X-CSRFToken", csrftoken);
+  http.setRequestHeader("Content-type", "application/json");
+  http.setRequestHeader("Content-length", gameData.length);
+  http.setRequestHeader("Connection", "close");
+  
+  http.onreadystatechange = function() {
+    if(http.readyState == 4 && http.status == 200) {
+      document.getElementById("status").innerHTML = http.responseText;
+      alert(http.responseText);
+    }
+  }
+
+  http.send(gameData);
+}
+  
+  
+function resetGame() {
+  if (confirm("This can't be undone.  Are you sure you want to reset all progress?")) {
+    game.resetGame();
+    saveGame();
+  }
+}
+
+</script>
